@@ -1,0 +1,97 @@
+name: Sync Fork with Parent
+
+# Run daily at 2 AM EST (7 AM UTC) to check for updates
+on:
+  schedule:
+    - cron: '0 7 * * *'  # Daily at 2 AM EST
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Checkout your fork with full history
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          # Use a personal access token with repo permissions
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # Configure Git
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Add the parent repository as upstream remote
+      - name: Add upstream remote
+        run: |
+          # Replace 'PARENT_OWNER/PARENT_REPO' with actual parent repo
+          # Example: git remote add upstream https://github.com/microsoft/vscode.git
+          git remote add upstream https://github.com/nadabdesigns/portfolio.git
+          git remote -v
+
+      # Fetch latest changes from upstream
+      - name: Fetch upstream changes
+        run: |
+          git fetch upstream
+          echo "✅ Fetched latest changes from upstream"
+
+      # Check if there are new commits in upstream
+      - name: Check for updates
+        id: check_updates
+        run: |
+          # Get the latest commit hash from upstream main
+          upstream_commit=$(git rev-parse upstream/main)
+          # Get the latest commit hash from your fork's main
+          fork_commit=$(git rev-parse origin/main)
+          
+          echo "Upstream commit: $upstream_commit"
+          echo "Fork commit: $fork_commit"
+          
+          if [ "$upstream_commit" != "$fork_commit" ]; then
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "✅ Updates found in upstream repository"
+          else
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ Fork is already up to date"
+          fi
+
+      # Merge upstream changes if updates exist
+      - name: Merge upstream changes
+        if: steps.check_updates.outputs.has_updates == 'true'
+        run: |
+          echo "🔄 Syncing fork with upstream..."
+          
+          # Switch to main branch
+          git checkout main
+          
+          # Merge upstream changes
+          if git merge upstream/main --no-edit; then
+            echo "✅ Successfully merged upstream changes"
+            
+            # Push the updates to your fork
+            git push origin main
+            echo "✅ Pushed updates to fork"
+          else
+            echo "❌ Merge conflict detected!"
+            echo "Manual intervention required to resolve conflicts"
+            git merge --abort
+            exit 1
+          fi
+
+      # Create summary
+      - name: Create sync summary
+        run: |
+          if [ "${{ steps.check_updates.outputs.has_updates }}" == "true" ]; then
+            echo "## 🎉 Fork Sync Complete" >> $GITHUB_STEP_SUMMARY
+            echo "Successfully synced fork with upstream changes" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Changes merged:" >> $GITHUB_STEP_SUMMARY
+            git log --oneline HEAD~5..HEAD >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ Fork Up to Date" >> $GITHUB_STEP_SUMMARY
+            echo "No new changes in upstream repository" >> $GITHUB_STEP_SUMMARY
+          fi
